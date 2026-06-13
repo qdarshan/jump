@@ -1,13 +1,13 @@
-package arc.astra.shrtnr;
+package arc.astra.jump;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class ShrtnrApplication {
+public class JumpApplication {
 
     public static void main(String[] args) {
-        SpringApplication.run(ShrtnrApplication.class, args);
+        SpringApplication.run(JumpApplication.class, args);
     }
 
 }

@@ -1,10 +1,10 @@
-package arc.astra.shrtnr;
+package arc.astra.jump;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class ShrtnrApplicationTests {
+class JumpApplicationTests {
 
     @Test
     void contextLoads() {

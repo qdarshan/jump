@@ -1,6 +1,6 @@
 spring:
   application:
-    name: shrtnr
+    name: jump
   data:
     redis:
       host: localhost

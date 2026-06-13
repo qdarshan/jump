@@ -1,9 +1,10 @@
-package arc.astra.shrtnr.controller;
+package arc.astra.jump.controller;
 
-import arc.astra.shrtnr.model.ShortenRequest;
-import arc.astra.shrtnr.model.ShortenResponse;
-import arc.astra.shrtnr.service.ShrtnrService;
-import org.springframework.http.HttpHeaders;
+import arc.astra.jump.model.ShortenRequest;
+import arc.astra.jump.model.ShortenResponse;
+import arc.astra.jump.service.JumpService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -12,17 +13,25 @@ import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 import java.net.URI;
 
 @RestController
-public class ShrtnrController {
+public class JumpController {
 
-    private final ShrtnrService shrtnrService;
+    private final JumpService jumpService;
 
-    public ShrtnrController(ShrtnrService shrtnrService) {
-        this.shrtnrService = shrtnrService;
+    public JumpController(JumpService jumpService) {
+        this.jumpService = jumpService;
     }
 
     @PostMapping("/shorten")
-    public ResponseEntity<ShortenResponse> shorten(@RequestBody ShortenRequest shortenRequest) {
-        String code = shrtnrService.shortenURL(shortenRequest.url());
+    public ResponseEntity<ShortenResponse> shorten(
+            @RequestBody @Valid ShortenRequest shortenRequest,
+            HttpServletRequest request) {
+        String clientIp = request.getRemoteAddr();
+        if (jumpService.isRateLimited(clientIp)){
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .build();
+        }
+
+        String code = jumpService.shortenUrl(shortenRequest.url());
 
         URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/{code}")
@@ -37,7 +46,7 @@ public class ShrtnrController {
 
     @GetMapping("/{code}")
     public ResponseEntity<Void> redirect(@PathVariable String code) {
-        String url = shrtnrService.redirectURL(code);
+        String url = jumpService.resolveUrl(code);
 
         if (url == null) {
             return ResponseEntity.notFound().build();
