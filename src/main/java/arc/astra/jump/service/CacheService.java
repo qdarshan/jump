@@ -6,7 +6,11 @@ import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 @Service
@@ -17,6 +21,8 @@ public class CacheService {
     private final static String RATE_LIMIT_KEY_PATTERN = "jump:ratelimit:%s";
     private final static String URL_KEY_PATTERN = "jump:url:%s";
     private final static String ANALYTICS_CLICKS_KEY = "jump:analytics:clicks";
+    private final static String ANALYTICS_CLICKS_RECORD_PATTERN = "jump:analytics:clicks:%s";
+    private final static String URL_META_KEY_PATTERN = "jump:url:meta:%s";
 
 
     private final RedisTemplate<String, Object> redisTemplate;
@@ -42,9 +48,30 @@ public class CacheService {
         return count != null ? count : 0L;
     }
 
-    public void storeUrl(@NonNull String code, @NonNull String url) {
+    public void storeUrl(@NonNull String code, @NonNull String url, long ttlInSeconds) {
         String key = String.format(URL_KEY_PATTERN, code);
-        redisTemplate.opsForValue().set(key, url);
+        redisTemplate.opsForValue().set(key, url, Duration.ofSeconds(ttlInSeconds));
+    }
+
+    public void storeMetadata(String code, @NonNull String url, @NonNull String ipAddress, long ttlInSeconds) {
+        Map<String, String> values = Map.of(
+                "url", url,
+                "createdBy", ipAddress,
+                "createdAt", Instant.now().toString()
+        );
+        String key = String.format(URL_META_KEY_PATTERN, code);
+        redisTemplate.opsForHash().putAll(key, values);
+        redisTemplate.expire(key, Duration.ofSeconds(ttlInSeconds));
+    }
+
+    public Map<String, String> getMetadata(String code) {
+        String key = String.format(URL_META_KEY_PATTERN, code);
+        return redisTemplate.<String, String>opsForHash().entries(key);
+    }
+
+    public long getKeyTtl(@NonNull String code) {
+        String key = String.format(URL_KEY_PATTERN, code);
+        return redisTemplate.getExpire(key);
     }
 
     public String getUrl(@NonNull String code) {
@@ -54,6 +81,25 @@ public class CacheService {
 
     public void updateLeaderboard(String code) {
         redisTemplate.opsForZSet().incrementScore(ANALYTICS_CLICKS_KEY, code, 1);
+    }
+
+    public void recordClick(@NonNull String code, long ttlInSeconds) {
+        String key = String.format(ANALYTICS_CLICKS_RECORD_PATTERN, code);
+        redisTemplate.opsForList().leftPush(key, Instant.now().toString());
+        redisTemplate.opsForList().trim(key, 0, 49);
+        redisTemplate.expire(key, Duration.ofSeconds(ttlInSeconds));
+
+    }
+
+    public List<Object> getRecordedClicks(@NonNull String code) {
+        String key = String.format(ANALYTICS_CLICKS_RECORD_PATTERN, code);
+        return redisTemplate.opsForList().range(key, 0, 49);
+    }
+
+
+    public long getClicks(@NonNull String code) {
+        Double score = redisTemplate.opsForZSet().score(ANALYTICS_CLICKS_KEY, code);
+        return score != null ? score.longValue() : 0L;
     }
 
     public Set<ZSetOperations.TypedTuple<Object>> getLeaderboard() {

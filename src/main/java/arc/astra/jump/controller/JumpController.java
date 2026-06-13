@@ -1,6 +1,7 @@
 package arc.astra.jump.controller;
 
 import arc.astra.jump.model.LeaderboardEntry;
+import arc.astra.jump.model.Metadata;
 import arc.astra.jump.model.ShortenRequest;
 import arc.astra.jump.model.ShortenResponse;
 import arc.astra.jump.service.JumpService;
@@ -33,7 +34,7 @@ public class JumpController {
                     .build();
         }
 
-        String code = jumpService.shortenUrl(shortenRequest.url());
+        String code = jumpService.shortenUrl(shortenRequest.url(), clientIp);
 
         URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/{code}")
@@ -62,6 +63,11 @@ public class JumpController {
     @GetMapping("/leaderboard")
     public ResponseEntity<List<LeaderboardEntry>> getLeaderboard() {
         return ResponseEntity.ok(jumpService.getLeaderboard());
+    }
+
+    @GetMapping("/stats/{code}")
+    public ResponseEntity<Metadata> metadata(@PathVariable String code) {
+        return ResponseEntity.ok(jumpService.getMetadata(code));
     }
 
 }
