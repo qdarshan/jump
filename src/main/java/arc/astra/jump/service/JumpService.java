@@ -1,11 +1,16 @@
 package arc.astra.jump.service;
 
+import arc.astra.jump.exception.RateLimitExceedException;
+import arc.astra.jump.exception.ResourceNotFoundException;
 import arc.astra.jump.model.LeaderboardEntry;
+import arc.astra.jump.model.LinkResponse;
 import arc.astra.jump.model.Metadata;
 import org.jspecify.annotations.NonNull;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
+import java.net.URI;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -14,8 +19,14 @@ import java.util.Set;
 @Service
 public class JumpService {
 
-    private final static int RATE_LIMIT_TTL = 60;
+    private final static int MAX_REQUESTS_PER_WINDOW = 10;
+    private final static int RATE_LIMIT_WINDOW_SECONDS = 60;
+    private final static int MAX_CLICKS_PER_WINDOW = 1;
+    private final static int CLICK_DEBOUNCE_SECONDS = 5;
     private final static int AUTO_EXPIRE_DURATION_IN_SECONDS = 604800;
+
+    private final static String RATE_LIMIT_SHORTEN_PATTERN = "jump:ratelimit:shorten:%s";
+    private final static String RATE_LIMIT_CLICK_PATTERN = "jump:ratelimit:click:%s:%s";
 
 
     private final CacheService cacheService;
@@ -24,28 +35,49 @@ public class JumpService {
         this.cacheService = cacheService;
     }
 
-    public String shortenUrl(@NonNull String url, @NonNull String ipAddress) {
+    public LinkResponse shortenUrl(@NonNull String url, @NonNull String email) {
+
+        if (isShortenRateLimited(email)) {
+            throw new RateLimitExceedException("Too many requests. You have temporarily exceeded your link generation quota. Please wait a moment and try again.");
+        }
+
         long count = cacheService.incrementCounter();
         String code = Base62Encoder.encode(count);
         cacheService.storeUrl(code, url, AUTO_EXPIRE_DURATION_IN_SECONDS);
-        cacheService.storeMetadata(code, url, ipAddress, AUTO_EXPIRE_DURATION_IN_SECONDS);
+        cacheService.storeMetadata(code, url, email, AUTO_EXPIRE_DURATION_IN_SECONDS);
 
-        return code;
+        URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
+                .path("/{code}")
+                .buildAndExpand(code)
+                .toUri();
+
+        return new LinkResponse(code, location);
     }
 
-    public boolean isRateLimited(@NonNull String ipAddress) {
-        long count = cacheService.incrementRateLimitCounter(ipAddress, RATE_LIMIT_TTL);
-        return count > 10;
+    private boolean isShortenRateLimited(@NonNull String email) {
+        String key = String.format(RATE_LIMIT_SHORTEN_PATTERN, email);
+        long count = cacheService.incrementRateLimitCounter(key, RATE_LIMIT_WINDOW_SECONDS);
+        return count > MAX_REQUESTS_PER_WINDOW;
     }
 
-    public String resolveUrl(@NonNull String code) {
+    public String resolveUrl(@NonNull String code, @NonNull String clientIp) {
         String url = cacheService.getUrl(code);
-        if (url != null) {
+
+        if (url == null) {
+            throw new ResourceNotFoundException("This short link could not be found. It may have been entered incorrectly or has expired.");
+        }
+
+        if (!isClickSpam(code, clientIp)) {
             cacheService.recordClick(code, AUTO_EXPIRE_DURATION_IN_SECONDS);
             cacheService.updateLeaderboard(code);
         }
         return url;
+    }
 
+    private boolean isClickSpam(@NonNull String code, @NonNull String ipAddress) {
+        String key = String.format(RATE_LIMIT_CLICK_PATTERN, code, ipAddress);
+        long count = cacheService.incrementRateLimitCounter(key, CLICK_DEBOUNCE_SECONDS);
+        return count > MAX_CLICKS_PER_WINDOW;
     }
 
     public List<LeaderboardEntry> getLeaderboard() {
@@ -67,7 +99,7 @@ public class JumpService {
         String url = cacheService.getUrl(code);
 
         if (url == null) {
-            throw new IllegalArgumentException("code not found or expired");
+            throw new ResourceNotFoundException("Could not retrieve analytics. This short code either does not exist or has expired.");
         }
 
         long totalClicks = cacheService.getClicks(code);
@@ -77,6 +109,7 @@ public class JumpService {
 
         List<Instant> recentClicks = cacheService.getRecordedClicks(code)
                 .stream()
+                .filter(c -> c instanceof String)
                 .map(c -> Instant.parse((String) c))
                 .toList();
 

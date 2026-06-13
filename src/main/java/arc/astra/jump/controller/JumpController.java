@@ -2,15 +2,14 @@ package arc.astra.jump.controller;
 
 import arc.astra.jump.model.LeaderboardEntry;
 import arc.astra.jump.model.Metadata;
-import arc.astra.jump.model.ShortenRequest;
-import arc.astra.jump.model.ShortenResponse;
+import arc.astra.jump.model.CreateLinkRequest;
+import arc.astra.jump.model.LinkResponse;
 import arc.astra.jump.service.JumpService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.net.URI;
 import java.util.List;
@@ -25,35 +24,17 @@ public class JumpController {
     }
 
     @PostMapping("/shorten")
-    public ResponseEntity<ShortenResponse> shorten(
-            @RequestBody @Valid ShortenRequest shortenRequest,
-            HttpServletRequest request) {
-        String clientIp = request.getRemoteAddr();
-        if (jumpService.isRateLimited(clientIp)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .build();
-        }
+    public ResponseEntity<LinkResponse> shorten(
+            @RequestBody @Valid CreateLinkRequest createLinkRequest) {
+        LinkResponse response = jumpService.shortenUrl(createLinkRequest.url(), createLinkRequest.email());
 
-        String code = jumpService.shortenUrl(shortenRequest.url(), clientIp);
-
-        URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
-                .path("/{code}")
-                .buildAndExpand(code)
-                .toUri();
-
-        ShortenResponse response = new ShortenResponse(code, location.toString());
-
-        return ResponseEntity.created(location)
+        return ResponseEntity.created(response.shortUrl())
                 .body(response);
     }
 
     @GetMapping("/{code}")
-    public ResponseEntity<Void> redirect(@PathVariable String code) {
-        String url = jumpService.resolveUrl(code);
-
-        if (url == null) {
-            return ResponseEntity.notFound().build();
-        }
+    public ResponseEntity<Void> redirect(@PathVariable String code, HttpServletRequest request) {
+        String url = jumpService.resolveUrl(code, request.getRemoteAddr());
 
         return ResponseEntity.status(HttpStatus.FOUND)
                 .location(URI.create(url))

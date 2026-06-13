@@ -18,7 +18,6 @@ public class CacheService {
 
     // Keys
     private final static String URL_COUNTER_KEY = "jump:url:counter";
-    private final static String RATE_LIMIT_KEY_PATTERN = "jump:ratelimit:%s";
     private final static String URL_KEY_PATTERN = "jump:url:%s";
     private final static String ANALYTICS_CLICKS_KEY = "jump:analytics:clicks";
     private final static String ANALYTICS_CLICKS_RECORD_PATTERN = "jump:analytics:clicks:%s";
@@ -37,9 +36,7 @@ public class CacheService {
         return redisTemplate.opsForValue().increment(URL_COUNTER_KEY);
     }
 
-    public long incrementRateLimitCounter(@NonNull String ipAddress, long ttl) {
-        String key = String.format(RATE_LIMIT_KEY_PATTERN, ipAddress);
-
+    public long incrementRateLimitCounter(@NonNull String key, long ttl) {
         Long count = redisTemplate.execute(
                 rateLimitScript,
                 Collections.singletonList(key),
@@ -53,10 +50,10 @@ public class CacheService {
         redisTemplate.opsForValue().set(key, url, Duration.ofSeconds(ttlInSeconds));
     }
 
-    public void storeMetadata(String code, @NonNull String url, @NonNull String ipAddress, long ttlInSeconds) {
+    public void storeMetadata(@NonNull String code, @NonNull String url, @NonNull String email, long ttlInSeconds) {
         Map<String, String> values = Map.of(
                 "url", url,
-                "createdBy", ipAddress,
+                "createdBy", email,
                 "createdAt", Instant.now().toString()
         );
         String key = String.format(URL_META_KEY_PATTERN, code);
@@ -64,7 +61,7 @@ public class CacheService {
         redisTemplate.expire(key, Duration.ofSeconds(ttlInSeconds));
     }
 
-    public Map<String, String> getMetadata(String code) {
+    public Map<String, String> getMetadata(@NonNull String code) {
         String key = String.format(URL_META_KEY_PATTERN, code);
         return redisTemplate.<String, String>opsForHash().entries(key);
     }
@@ -79,7 +76,7 @@ public class CacheService {
         return (String) redisTemplate.opsForValue().get(key);
     }
 
-    public void updateLeaderboard(String code) {
+    public void updateLeaderboard(@NonNull String code) {
         redisTemplate.opsForZSet().incrementScore(ANALYTICS_CLICKS_KEY, code, 1);
     }
 
