@@ -1,5 +1,6 @@
 package arc.astra.jump.controller;
 
+import arc.astra.jump.model.LeaderboardEntry;
 import arc.astra.jump.model.ShortenRequest;
 import arc.astra.jump.model.ShortenResponse;
 import arc.astra.jump.service.JumpService;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.net.URI;
+import java.util.List;
 
 @RestController
 public class JumpController {
@@ -26,7 +28,7 @@ public class JumpController {
             @RequestBody @Valid ShortenRequest shortenRequest,
             HttpServletRequest request) {
         String clientIp = request.getRemoteAddr();
-        if (jumpService.isRateLimited(clientIp)){
+        if (jumpService.isRateLimited(clientIp)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .build();
         }
@@ -57,5 +59,9 @@ public class JumpController {
                 .build();
     }
 
+    @GetMapping("/leaderboard")
+    public ResponseEntity<List<LeaderboardEntry>> getLeaderboard() {
+        return ResponseEntity.ok(jumpService.getLeaderboard());
+    }
 
 }

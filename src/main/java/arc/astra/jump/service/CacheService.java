@@ -2,10 +2,12 @@ package arc.astra.jump.service;
 
 import org.jspecify.annotations.NonNull;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.stereotype.Service;
 
 import java.util.Collections;
+import java.util.Set;
 
 @Service
 public class CacheService {
@@ -14,6 +16,7 @@ public class CacheService {
     private final static String URL_COUNTER_KEY = "jump:url:counter";
     private final static String RATE_LIMIT_KEY_PATTERN = "jump:ratelimit:%s";
     private final static String URL_KEY_PATTERN = "jump:url:%s";
+    private final static String ANALYTICS_CLICKS_KEY = "jump:analytics:clicks";
 
 
     private final RedisTemplate<String, Object> redisTemplate;
@@ -47,5 +50,13 @@ public class CacheService {
     public String getUrl(@NonNull String code) {
         String key = String.format(URL_KEY_PATTERN, code);
         return (String) redisTemplate.opsForValue().get(key);
+    }
+
+    public void updateLeaderboard(String code) {
+        redisTemplate.opsForZSet().incrementScore(ANALYTICS_CLICKS_KEY, code, 1);
+    }
+
+    public Set<ZSetOperations.TypedTuple<Object>> getLeaderboard() {
+        return redisTemplate.opsForZSet().reverseRangeWithScores(ANALYTICS_CLICKS_KEY, 0, 9);
     }
 }
