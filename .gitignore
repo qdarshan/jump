@@ -1,0 +1,9 @@
+# Local IDE and tool settings
+.idea/
+*.iml
+*.iws
+
+# Gradle local caches and build outputs
+.gradle/
+build/
+backend/build/
