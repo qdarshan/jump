@@ -1,7 +1,13 @@
 spring:
   application:
     name: jump
+  sql:
+    init:
+      mode: always
   data:
     redis:
       host: localhost
       port: 6379
+  datasource:
+    url: jdbc:sqlite:jump.sqlite
+    driver-class-name: org.sqlite.JDBC

@@ -1,7 +1,7 @@
 package arc.astra.jump.controller;
 
 import arc.astra.jump.model.LeaderboardEntry;
-import arc.astra.jump.model.Metadata;
+import arc.astra.jump.model.Analytics;
 import arc.astra.jump.model.CreateLinkRequest;
 import arc.astra.jump.model.LinkResponse;
 import arc.astra.jump.service.JumpService;
@@ -47,8 +47,8 @@ public class JumpController {
     }
 
     @GetMapping("/stats/{code}")
-    public ResponseEntity<Metadata> metadata(@PathVariable String code) {
-        return ResponseEntity.ok(jumpService.getMetadata(code));
+    public ResponseEntity<Analytics> metadata(@PathVariable String code) {
+        return ResponseEntity.ok(jumpService.getStats(code));
     }
 
 }

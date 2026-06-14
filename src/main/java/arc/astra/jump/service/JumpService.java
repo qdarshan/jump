@@ -1,16 +1,19 @@
 package arc.astra.jump.service;
 
+import arc.astra.jump.dao.JumpLinkRepository;
 import arc.astra.jump.exception.RateLimitExceedException;
 import arc.astra.jump.exception.ResourceNotFoundException;
+import arc.astra.jump.model.Analytics;
+import arc.astra.jump.model.JumpLink;
 import arc.astra.jump.model.LeaderboardEntry;
 import arc.astra.jump.model.LinkResponse;
-import arc.astra.jump.model.Metadata;
 import org.jspecify.annotations.NonNull;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
 
 import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -30,9 +33,11 @@ public class JumpService {
 
 
     private final CacheService cacheService;
+    private final JumpLinkRepository jumpLinkRepository;
 
-    public JumpService(CacheService cacheService) {
+    public JumpService(CacheService cacheService, JumpLinkRepository jumpLinkRepository) {
         this.cacheService = cacheService;
+        this.jumpLinkRepository = jumpLinkRepository;
     }
 
     public LinkResponse shortenUrl(@NonNull String url, @NonNull String email) {
@@ -43,8 +48,11 @@ public class JumpService {
 
         long count = cacheService.incrementCounter();
         String code = Base62Encoder.encode(count);
-        cacheService.storeUrl(code, url, AUTO_EXPIRE_DURATION_IN_SECONDS);
-        cacheService.storeMetadata(code, url, email, AUTO_EXPIRE_DURATION_IN_SECONDS);
+
+        JumpLink jumpLink = new JumpLink(code, url, email, Instant.now(), Instant.now().plusSeconds(AUTO_EXPIRE_DURATION_IN_SECONDS));
+
+        jumpLinkRepository.save(jumpLink);
+        cacheService.cacheJumpLink(jumpLink);
 
         URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/{code}")
@@ -61,17 +69,29 @@ public class JumpService {
     }
 
     public String resolveUrl(@NonNull String code, @NonNull String clientIp) {
-        String url = cacheService.getUrl(code);
-
-        if (url == null) {
-            throw new ResourceNotFoundException("This short link could not be found. It may have been entered incorrectly or has expired.");
+        Map<String, String> metadata = cacheService.getMetadata(code);
+        JumpLink jumpLink;
+        if (metadata == null || metadata.isEmpty()) {
+            jumpLink = fetchLinkFromSource(code);
+            if (Instant.now().isAfter(jumpLink.expiresAt())) {
+                throw new ResourceNotFoundException("This short code either does not exist or has expired.");
+            }
+            cacheService.cacheJumpLink(jumpLink);
+        } else {
+            jumpLink = new JumpLink(
+                    code,
+                    metadata.get("url"),
+                    metadata.get("createdBy"),
+                    Instant.parse(metadata.get("createdAt")),
+                    Instant.now().plusSeconds(cacheService.getKeyTtl(code))
+            );
         }
 
         if (!isClickSpam(code, clientIp)) {
-            cacheService.recordClick(code, AUTO_EXPIRE_DURATION_IN_SECONDS);
-            cacheService.updateLeaderboard(code);
+            long remainingTtl = Math.max(0, Duration.between(Instant.now(), jumpLink.expiresAt()).toSeconds());
+            cacheService.trackClick(code, remainingTtl);
         }
-        return url;
+        return jumpLink.url();
     }
 
     private boolean isClickSpam(@NonNull String code, @NonNull String ipAddress) {
@@ -95,34 +115,54 @@ public class JumpService {
                 .toList();
     }
 
-    public Metadata getMetadata(@NonNull String code) {
-        String url = cacheService.getUrl(code);
+    public Analytics getStats(@NonNull String code) {
+        String url;
+        Instant createdAt;
+        String createdBy;
+        long expiresInSeconds;
 
-        if (url == null) {
-            throw new ResourceNotFoundException("Could not retrieve analytics. This short code either does not exist or has expired.");
+        Map<String, String> metadata = cacheService.getMetadata(code);
+        if (metadata == null || metadata.isEmpty()) {
+            JumpLink jumpLink = fetchLinkFromSource(code);
+            if (Instant.now().isAfter(jumpLink.expiresAt())) {
+                throw new ResourceNotFoundException("This short code either does not exist or has expired.");
+            }
+            cacheService.cacheJumpLink(jumpLink);
+            url = jumpLink.url();
+            createdAt = jumpLink.createdAt();
+            createdBy = jumpLink.createdBy();
+            expiresInSeconds = Math.max(0, Duration.between(Instant.now(), jumpLink.expiresAt()).toSeconds());
+        } else {
+            url = metadata.get("url");
+            createdAt = metadata.get("createdAt") == null ? null : Instant.parse(metadata.get("createdAt"));
+            createdBy = metadata.get("createdBy");
+            expiresInSeconds = Math.max(0, cacheService.getKeyTtl(code));
         }
 
         long totalClicks = cacheService.getClicks(code);
-        Map<String, String> metadata = cacheService.getMetadata(code);
-        Instant createdAt = (metadata.get("createdAt") == null ? null : Instant.parse(String.valueOf(metadata.get("createdAt"))));
-        long expiresInSeconds = Math.max(0, cacheService.getKeyTtl(code));
-
         List<Instant> recentClicks = cacheService.getRecordedClicks(code)
                 .stream()
                 .filter(c -> c instanceof String)
                 .map(c -> Instant.parse((String) c))
                 .toList();
 
-        return new Metadata(
+        return new Analytics(
                 code,
                 totalClicks,
                 recentClicks,
                 url,
                 createdAt,
-                metadata.get("createdBy"),
+                createdBy,
                 expiresInSeconds
         );
     }
+
+    private JumpLink fetchLinkFromSource(@NonNull String code) {
+        return jumpLinkRepository.findByCode(code)
+                .orElseThrow(() -> new ResourceNotFoundException("Jump link could not be found. It may have been entered incorrectly or has expired."));
+    }
+
+
 }
 
 

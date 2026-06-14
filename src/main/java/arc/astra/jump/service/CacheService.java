@@ -1,5 +1,6 @@
 package arc.astra.jump.service;
 
+import arc.astra.jump.model.JumpLink;
 import org.jspecify.annotations.NonNull;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
@@ -45,20 +46,30 @@ public class CacheService {
         return count != null ? count : 0L;
     }
 
-    public void storeUrl(@NonNull String code, @NonNull String url, long ttlInSeconds) {
-        String key = String.format(URL_KEY_PATTERN, code);
-        redisTemplate.opsForValue().set(key, url, Duration.ofSeconds(ttlInSeconds));
+    // store jump link and metadata
+    public void cacheJumpLink(@NonNull JumpLink jumpLink) {
+        storeJumpLink(jumpLink);
+        storeMetadata(jumpLink);
     }
 
-    public void storeMetadata(@NonNull String code, @NonNull String url, @NonNull String email, long ttlInSeconds) {
+    private void storeJumpLink(@NonNull JumpLink jumpLink) {
+        String key = String.format(URL_KEY_PATTERN, jumpLink.code());
+        redisTemplate.opsForValue().set(key, jumpLink.url(), Duration.ofSeconds(remainingTtl(jumpLink.expiresAt())));
+    }
+
+    private void storeMetadata(@NonNull JumpLink jumpLink) {
         Map<String, String> values = Map.of(
-                "url", url,
-                "createdBy", email,
-                "createdAt", Instant.now().toString()
+                "url", jumpLink.url(),
+                "createdBy", jumpLink.createdBy(),
+                "createdAt", jumpLink.createdAt().toString()
         );
-        String key = String.format(URL_META_KEY_PATTERN, code);
+        String key = String.format(URL_META_KEY_PATTERN, jumpLink.code());
         redisTemplate.opsForHash().putAll(key, values);
-        redisTemplate.expire(key, Duration.ofSeconds(ttlInSeconds));
+        redisTemplate.expire(key, Duration.ofSeconds(remainingTtl(jumpLink.expiresAt())));
+    }
+
+    private long remainingTtl(Instant expiresAt) {
+        return Math.max(0, Duration.between(Instant.now(), expiresAt).toSeconds());
     }
 
     public Map<String, String> getMetadata(@NonNull String code) {
@@ -71,21 +82,15 @@ public class CacheService {
         return redisTemplate.getExpire(key);
     }
 
-    public String getUrl(@NonNull String code) {
-        String key = String.format(URL_KEY_PATTERN, code);
-        return (String) redisTemplate.opsForValue().get(key);
-    }
-
-    public void updateLeaderboard(@NonNull String code) {
-        redisTemplate.opsForZSet().incrementScore(ANALYTICS_CLICKS_KEY, code, 1);
-    }
-
-    public void recordClick(@NonNull String code, long ttlInSeconds) {
+    // record click and update the leaderboard
+    public void trackClick(@NonNull String code, long ttlInSeconds) {
         String key = String.format(ANALYTICS_CLICKS_RECORD_PATTERN, code);
         redisTemplate.opsForList().leftPush(key, Instant.now().toString());
         redisTemplate.opsForList().trim(key, 0, 49);
-        redisTemplate.expire(key, Duration.ofSeconds(ttlInSeconds));
 
+        long safeTtl = Math.max(1, ttlInSeconds);
+        redisTemplate.expire(key, Duration.ofSeconds(safeTtl));
+        redisTemplate.opsForZSet().incrementScore(ANALYTICS_CLICKS_KEY, code, 1);
     }
 
     public List<Object> getRecordedClicks(@NonNull String code) {
