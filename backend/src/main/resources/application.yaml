@@ -11,3 +11,14 @@ spring:
   datasource:
     url: jdbc:sqlite:jump.sqlite
     driver-class-name: org.sqlite.JDBC
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, metrics, prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    tags:
+      application: jump

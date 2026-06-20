@@ -7,6 +7,7 @@ import arc.astra.jump.model.Analytics;
 import arc.astra.jump.model.JumpLink;
 import arc.astra.jump.model.LeaderboardEntry;
 import arc.astra.jump.model.LinkResponse;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.jspecify.annotations.NonNull;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static arc.astra.jump.constant.Keys.RATE_LIMIT_CLICK_PATTERN;
+import static arc.astra.jump.constant.Keys.RATE_LIMIT_SHORTEN_PATTERN;
+
 @Service
 public class JumpService {
 
@@ -28,21 +32,22 @@ public class JumpService {
     private final static int CLICK_DEBOUNCE_SECONDS = 5;
     private final static int AUTO_EXPIRE_DURATION_IN_SECONDS = 604800;
 
-    private final static String RATE_LIMIT_SHORTEN_PATTERN = "jump:ratelimit:shorten:%s";
-    private final static String RATE_LIMIT_CLICK_PATTERN = "jump:ratelimit:click:%s:%s";
-
 
     private final CacheService cacheService;
     private final JumpLinkRepository jumpLinkRepository;
+    private final MeterRegistry meterRegistry;
 
-    public JumpService(CacheService cacheService, JumpLinkRepository jumpLinkRepository) {
+    public JumpService(CacheService cacheService, JumpLinkRepository jumpLinkRepository, MeterRegistry meterRegistry) {
         this.cacheService = cacheService;
         this.jumpLinkRepository = jumpLinkRepository;
+        this.meterRegistry = meterRegistry;
     }
 
     public LinkResponse shortenUrl(@NonNull String url, @NonNull String email) {
 
         if (isShortenRateLimited(email)) {
+
+            meterRegistry.counter("jump.ratelimit.exceeded", "action", "shorten").increment();
             throw new RateLimitExceedException("Too many requests. You have temporarily exceeded your link generation quota. Please wait a moment and try again.");
         }
 
@@ -54,6 +59,7 @@ public class JumpService {
         jumpLinkRepository.save(jumpLink);
         cacheService.cacheJumpLink(jumpLink);
 
+        meterRegistry.counter("jump.links.created").increment();
         URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/{code}")
                 .buildAndExpand(code)
@@ -72,12 +78,14 @@ public class JumpService {
         Map<String, String> metadata = cacheService.getMetadata(code);
         JumpLink jumpLink;
         if (metadata == null || metadata.isEmpty()) {
+            meterRegistry.counter("jump.cache.lookups", "result", "miss", "operation", "resolveUrl").increment();
             jumpLink = fetchLinkFromSource(code);
             if (Instant.now().isAfter(jumpLink.expiresAt())) {
                 throw new ResourceNotFoundException("This short code either does not exist or has expired.");
             }
             cacheService.cacheJumpLink(jumpLink);
         } else {
+            meterRegistry.counter("jump.cache.lookups", "result", "hit", "operation", "resolveUrl").increment();
             jumpLink = new JumpLink(
                     code,
                     metadata.get("url"),

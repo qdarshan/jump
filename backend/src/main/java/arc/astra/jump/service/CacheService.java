@@ -14,16 +14,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static arc.astra.jump.constant.Keys.*;
+
 @Service
 public class CacheService {
-
-    // Keys
-    private final static String URL_COUNTER_KEY = "jump:url:counter";
-    private final static String URL_KEY_PATTERN = "jump:url:%s";
-    private final static String ANALYTICS_CLICKS_KEY = "jump:analytics:clicks";
-    private final static String ANALYTICS_CLICKS_RECORD_PATTERN = "jump:analytics:clicks:%s";
-    private final static String URL_META_KEY_PATTERN = "jump:url:meta:%s";
-
 
     private final RedisTemplate<String, Object> redisTemplate;
     private final RedisScript<Long> rateLimitScript;
