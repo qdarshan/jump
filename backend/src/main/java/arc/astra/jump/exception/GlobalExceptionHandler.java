@@ -38,4 +38,10 @@ public class GlobalExceptionHandler {
         Error error = new Error("INTERNAL_ERROR", "An unexpected error occurred");
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
     }
+
+    @ExceptionHandler(AliasAlreadyExistsException.class)
+    public ResponseEntity<Error> handleAliasAlreadyExists(AliasAlreadyExistsException ex) {
+        Error error = new Error("ALIAS_ALREADY_EXISTS", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(error);
+    }
 }

@@ -1,6 +1,7 @@
 package arc.astra.jump.service;
 
 import arc.astra.jump.dao.JumpLinkRepository;
+import arc.astra.jump.exception.AliasAlreadyExistsException;
 import arc.astra.jump.exception.RateLimitExceedException;
 import arc.astra.jump.exception.ResourceNotFoundException;
 import arc.astra.jump.model.Analytics;
@@ -9,6 +10,7 @@ import arc.astra.jump.model.LeaderboardEntry;
 import arc.astra.jump.model.LinkResponse;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.jspecify.annotations.NonNull;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
@@ -31,6 +33,7 @@ public class JumpService {
     private final static int MAX_CLICKS_PER_WINDOW = 1;
     private final static int CLICK_DEBOUNCE_SECONDS = 5;
     private final static int AUTO_EXPIRE_DURATION_IN_SECONDS = 604800;
+    private final static String AUTO_CODE_PREFIX = "s-";
 
 
     private final CacheService cacheService;
@@ -43,7 +46,7 @@ public class JumpService {
         this.meterRegistry = meterRegistry;
     }
 
-    public LinkResponse shortenUrl(@NonNull String url, @NonNull String email) {
+    public LinkResponse shortenUrl(@NonNull String url, @NonNull String email, String alias) {
 
         if (isShortenRateLimited(email)) {
 
@@ -51,15 +54,32 @@ public class JumpService {
             throw new RateLimitExceedException("Too many requests. You have temporarily exceeded your link generation quota. Please wait a moment and try again.");
         }
 
-        long count = cacheService.incrementCounter();
-        String code = Base62Encoder.encode(count);
+        String code;
+        String linkType;
+        if (alias == null || alias.isBlank()) {
+            long count = cacheService.incrementCounter();
+            code = AUTO_CODE_PREFIX + Base62Encoder.encode(count);
+            linkType = "auto";
+        } else {
+            alias = alias.toLowerCase();
+            Map<String, String> existingMeta = cacheService.getMetadata(alias);
+            if (existingMeta != null && !existingMeta.isEmpty()) {
+                throw new AliasAlreadyExistsException("The requested vanity alias is already taken.");
+            }
+            code = alias;
+            linkType = "alias";
+        }
 
         JumpLink jumpLink = new JumpLink(code, url, email, Instant.now(), Instant.now().plusSeconds(AUTO_EXPIRE_DURATION_IN_SECONDS));
 
-        jumpLinkRepository.save(jumpLink);
+        try {
+            jumpLinkRepository.save(jumpLink);
+        } catch (DataIntegrityViolationException e) {
+            throw new AliasAlreadyExistsException("The requested vanity alias is already taken.");
+        }
         cacheService.cacheJumpLink(jumpLink);
 
-        meterRegistry.counter("jump.links.created").increment();
+        meterRegistry.counter("jump.links.created", "type", linkType).increment();
         URI location = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/{code}")
                 .buildAndExpand(code)

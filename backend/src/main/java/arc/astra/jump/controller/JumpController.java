@@ -26,7 +26,7 @@ public class JumpController {
     @PostMapping("/shorten")
     public ResponseEntity<LinkResponse> shorten(
             @RequestBody @Valid CreateLinkRequest createLinkRequest) {
-        LinkResponse response = jumpService.shortenUrl(createLinkRequest.url(), createLinkRequest.email());
+        LinkResponse response = jumpService.shortenUrl(createLinkRequest.url(), createLinkRequest.email(), createLinkRequest.alias());
 
         return ResponseEntity.created(response.shortUrl())
                 .body(response);
